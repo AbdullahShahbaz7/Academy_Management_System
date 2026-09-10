@@ -1,5 +1,6 @@
 import './style.css'
 import './login.css'
+import { isSupabaseConfigured, supabase } from './supabase.js'
 
 const app = document.querySelector('#app')
 
@@ -22,6 +23,7 @@ app.innerHTML = `
       <form class="login-card" id="login-form">
         <h2>Welcome Back</h2>
         <p class="login-hint">Please log in to your account</p>
+        <p class="login-status" role="status" aria-live="polite"></p>
         <div class="role-tabs" role="tablist" aria-label="Account type">
           <button type="button" class="active" aria-selected="true">Admin</button>
           <button type="button" aria-selected="false">Staff</button>
@@ -71,7 +73,7 @@ app.innerHTML = `
       <header class="topbar">
         <div class="topbar-row-left">
           <button class="menu-button" aria-label="Open menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></button>
-          <div class="topbar-title">Academy Admin</div>
+          <div device-widthclass="topbar-title">Academy Admin</div>
         </div>
 
         <div class="search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Search...</span></div>
@@ -153,6 +155,7 @@ const loginScreen = document.querySelector('.login-screen');
 const dashboardApp = document.querySelector('.dashboard-app');
 const loginForm = document.querySelector('#login-form');
 const passwordToggle = document.querySelector('.password-toggle');
+const loginStatus = document.querySelector('.login-status');
 const roleButtons = [...loginForm.querySelectorAll('.role-tabs button')];
 let selectedRole = 'Admin';
 
@@ -167,12 +170,48 @@ roleButtons.forEach((button) => {
     });
   });
 });
-loginForm.addEventListener('submit', (event) => {
+const destinationForRole = (role) => ({ admin: '/admin/attendance', teacher: '/admin/staff', staff: '/admin/staff' }[role] || '/admin/attendance');
+
+loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const submitButton = loginForm.querySelector('.login-submit');
+  const email = loginForm.elements.username.value.trim();
+  const password = loginForm.elements.password.value;
+
+  if (!isSupabaseConfigured) {
+    loginStatus.textContent = 'Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.';
+    loginStatus.className = 'login-status error';
+    return;
+  }
+
+  submitButton.disabled = true;
+  loginStatus.textContent = 'Signing in...';
+  loginStatus.className = 'login-status';
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    loginStatus.textContent = error.message;
+    loginStatus.className = 'login-status error';
+    submitButton.disabled = false;
+    return;
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', data.user.id)
+    .single();
+  if (profileError) {
+    loginStatus.textContent = 'Signed in, but your profile could not be loaded.';
+    loginStatus.className = 'login-status error';
+    submitButton.disabled = false;
+    return;
+  }
+
+  selectedRole = profile.role;
   loginScreen.hidden = true;
   dashboardApp.hidden = false;
-  const destination = { Admin: '/admin/attendance', Staff: '/admin/staff', Student: '/admin/student' }[selectedRole];
-  renderRoute(destination);
+  renderRoute(destinationForRole(profile.role));
+  submitButton.disabled = false;
 });
 passwordToggle.addEventListener('click', () => {
   const password = loginForm.elements.password;
@@ -190,7 +229,7 @@ const loginNavButton = document.querySelector('.login-nav');
 const pageContent = document.querySelector('.page-content');
 const attendanceMarkup = pageContent.innerHTML;
 let staffProfile = {
-  name: 'Dr. Robert Wilson', role: 'Senior Mathematics Teacher', id: 'EMP-2023-0042',
+  name: 'Dr. Robert Wilson', role: 'Senidevice-widthor Mathematics Teacher', id: 'EMP-2023-0042',
   birthDate: '15 May 1980', gender: 'Male', phone: '+1 (555) 123-4567',
   email: 'r.wilson@academypro.edu', address: '42 Education Lane, Academic City, AC 12345',
   emergencyContact: 'Sarah Wilson · Wife · +1 (555) 987-6543', subjects: ['Math', 'Calculus'],
@@ -864,6 +903,7 @@ navItems.forEach((item) => {
 });
 
 loginNavButton.addEventListener('click', () => {
+  supabase?.auth.signOut();
   dashboardApp.hidden = true;
   loginScreen.hidden = false;
   loginForm.reset();
